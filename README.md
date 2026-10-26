@@ -1,3 +1,20 @@
+Built on top of https://github.com/Physical-Intelligence/openpi/pull/854 which already contains code to train pi-05.
+PRs used:
+1. Efficient compute_norm_statistics: https://github.com/Physical-Intelligence/openpi/pull/1028
+
+# Lokesh
+1. To convert LIBERO data to LeRobot dataset, run the following command:
+```bash
+GIT_LFS_SKIP_SMUDGE=1 uv sync --group rlds
+```
+2. Precision setting for pytorch seems to be important.
+https://github.com/Physical-Intelligence/openpi/issues/810 (Scroll to find the problem and solution)
+3. To evaluate on D3IL, run files directly in d3il/simulation.py.
+
+This code converts D3IL data to lerobot format to enable pi05 training.
+
+To train pi05 on D3IL, see docstring in scripts/train_pytorch.py.
+
 # openpi
 
 openpi holds open-source models and packages for robotics, published by the [Physical Intelligence team](https://www.physicalintelligence.company/).

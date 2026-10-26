@@ -5,7 +5,7 @@ We use the Libero dataset (stored in RLDS) for this example, but it can be easil
 modified for any other data you have saved in a custom format.
 
 Usage:
-uv run examples/libero/convert_libero_data_to_lerobot.py --data_dir /path/to/your/data
+uv run examples/libero/convert_libero_data_to_lerobot.py --data_dir /data1/lokesh/openpi-pi05/datasets
 
 If you want to push your dataset to the Hugging Face Hub, you can use the following command:
 uv run examples/libero/convert_libero_data_to_lerobot.py --data_dir /path/to/your/data --push_to_hub
@@ -19,13 +19,14 @@ Running this conversion script will take approximately 30 minutes.
 """
 
 import shutil
-
+from tqdm import tqdm
 from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import tensorflow_datasets as tfds
 import tyro
+tfds.disable_progress_bar()
 
-REPO_NAME = "your_hf_username/libero"  # Name of the output dataset, also used for the Hugging Face Hub
+REPO_NAME = "converted_libero"  # Name of the output dataset, also used for the Hugging Face Hub
 RAW_DATASET_NAMES = [
     "libero_10_no_noops",
     "libero_goal_no_noops",
@@ -77,7 +78,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
     # You can modify this for your own data format
     for raw_dataset_name in RAW_DATASET_NAMES:
         raw_dataset = tfds.load(raw_dataset_name, data_dir=data_dir, split="train")
-        for episode in raw_dataset:
+        for episode in tqdm(raw_dataset,desc=f'Converting {raw_dataset_name}'):
             for step in episode["steps"].as_numpy_iterator():
                 dataset.add_frame(
                     {

@@ -61,6 +61,29 @@ class TransformedDataset(Dataset[T_co]):
     def __len__(self) -> int:
         return len(self._dataset)
 
+class CombinedDataset(Dataset[T_co]):
+    """A dataset that combines multiple datasets into one."""
+
+    def __init__(self, datasets: Sequence[Dataset[T_co]]):
+        self._datasets = datasets
+        self._lengths = [len(d) for d in datasets]
+        self._cumulative_lengths = np.cumsum(self._lengths)
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        index = index.__index__()
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError("Index out of range")
+        dataset_idx = np.searchsorted(self._cumulative_lengths, index, side="right").item()
+        if dataset_idx == 0:
+            local_index = index
+        else:
+            local_index = index - self._cumulative_lengths[dataset_idx - 1].item()
+        return self._datasets[dataset_idx][local_index]
+
+    def __len__(self) -> int:
+        return sum(self._lengths)
 
 class IterableTransformedDataset(IterableDataset[T_co]):
     def __init__(
@@ -127,8 +150,26 @@ class FakeDataset(Dataset):
         return self._num_samples
 
 
+class LeRobotDatasetWithDummyVideos(lerobot_dataset.LeRobotDataset):
+    """LeRobot dataset that replaces decoded video frames with tiny placeholders."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["download_videos"] = False
+        super().__init__(*args, **kwargs)
+
+    def _query_videos(self, query_timestamps: dict[str, list[float]], ep_idx: int) -> dict[str, torch.Tensor]:
+        del ep_idx
+        return {
+            key: torch.zeros((len(timestamps), 3, 1, 1), dtype=torch.uint8).squeeze(0)
+            for key, timestamps in query_timestamps.items()
+        }
+
 def create_torch_dataset(
-    data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
+    data_config: _config.DataConfig,
+    action_horizon: int,
+    model_config: _model.BaseModelConfig,
+    *,
+    skip_video_decoding: bool = False,
 ) -> Dataset:
     """Create a dataset for training."""
     repo_id = data_config.repo_id
@@ -138,7 +179,9 @@ def create_torch_dataset(
         return FakeDataset(model_config, num_samples=1024)
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-    dataset = lerobot_dataset.LeRobotDataset(
+    print(f"Dataset metadata: {dataset_meta}")
+    dataset_cls = LeRobotDatasetWithDummyVideos if skip_video_decoding else lerobot_dataset.LeRobotDataset
+    dataset = dataset_cls(
         data_config.repo_id,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
@@ -239,10 +282,15 @@ def create_data_loader(
         skip_norm_stats: Whether to skip data normalization.
         framework: The framework to use ("jax" or "pytorch").
     """
-    data_config = config.data.create(config.assets_dirs, config.model)
-    logging.info(f"data_config: {data_config}")
+    
+    if isinstance(config.data,list):
+        data_config = [dc.create(config.assets_dirs, config.model) for dc in config.data]
+    else:
+        data_config = [config.data.create(config.assets_dirs, config.model)]
+        logging.info(f"data_config: {data_config}")
 
-    if data_config.rlds_data_dir is not None:
+    if data_config[0].rlds_data_dir is not None:
+        # Not enabling list for rlds data_loader
         return create_rlds_data_loader(
             data_config,
             action_horizon=config.model.action_horizon,
@@ -269,7 +317,7 @@ def create_data_loader(
 
 
 def create_torch_data_loader(
-    data_config: _config.DataConfig,
+    data_config: list[_config.DataConfig],
     model_config: _model.BaseModelConfig,
     action_horizon: int,
     batch_size: int,
@@ -299,8 +347,12 @@ def create_torch_data_loader(
             execute in the main process.
         seed: The seed to use for shuffling the data.
     """
-    dataset = create_torch_dataset(data_config, action_horizon, model_config)
-    dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
+    dataset_list = []
+    for each_data_config in data_config:
+        dataset = create_torch_dataset(each_data_config, action_horizon, model_config)
+        dataset = transform_dataset(dataset, each_data_config, skip_norm_stats=skip_norm_stats)
+        dataset_list.append(dataset)
+    dataset = CombinedDataset(dataset_list) if len(dataset_list) > 1 else dataset_list[0]
 
     # Use TorchDataLoader for both frameworks
     # For PyTorch DDP, create DistributedSampler and divide batch size by world size

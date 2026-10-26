@@ -12,8 +12,12 @@ Usage:
     python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --inspect_only
 
     # Convert to PyTorch:
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --output_path /path/to/output
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --output_path /path/to/output
+    # Credit: https://github.com/Physical-Intelligence/openpi/issues/810
+    python examples/convert_jax_model_to_pytorch.py \
+    --checkpoint_dir checkpoints/pi05_base \
+        --output_path checkpoints/pi05_base_pytorch \
+        --config_name pi05_libero
+    
 
 Example:
     # pi0_droid

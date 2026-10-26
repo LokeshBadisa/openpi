@@ -70,8 +70,8 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
         dir="gs://openpi-assets/checkpoints/pi05_droid",
     ),
     EnvMode.LIBERO: Checkpoint(
-        config="pi05_libero",
-        dir="gs://openpi-assets/checkpoints/pi05_libero",
+        config="pi05_libero_lora_pytorch",
+        dir="/data1/lokesh/openpi-pi05/checkpoints/pi05_libero_lora_pytorch/testing_libero/7499",
     ),
 }
 

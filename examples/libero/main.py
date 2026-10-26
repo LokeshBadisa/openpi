@@ -71,7 +71,7 @@ def eval_libero(args: Args) -> None:
         raise ValueError(f"Unknown task suite: {args.task_suite_name}")
 
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
-
+    print(f'Task Name:', args.task_suite_name)
     # Start evaluation
     total_episodes, total_successes = 0, 0
     for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
@@ -182,6 +182,10 @@ def eval_libero(args: Args) -> None:
         logging.info(f"Current task success rate: {float(task_successes) / float(task_episodes)}")
         logging.info(f"Current total success rate: {float(total_successes) / float(total_episodes)}")
 
+    with open(f'{args.task_suite_name}.txt','w') as f:
+        f.write(f'Task Name: {args.task_suite_name}\n')
+        f.write(f'Total success rate: {float(total_successes) / float(total_episodes)}\n')
+        f.write(f'Total episodes: {total_episodes}\n')
     logging.info(f"Total success rate: {float(total_successes) / float(total_episodes)}")
     logging.info(f"Total episodes: {total_episodes}")
 

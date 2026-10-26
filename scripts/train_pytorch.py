@@ -6,12 +6,14 @@ pipeline from `src/openpi/training/config.py` and `src/openpi/training/data_load
 
 Usage
 Single GPU:
-  python scripts/train_pytorch.py <config_name> --exp_name <run_name> --save_interval <interval>
+  TF_CPP_MIN_LOG_LEVEL=3 python scripts/train_pytorch.py pi05_libero_lora_pytorch --exp_name testing_libero --save_interval 100
+  TF_CPP_MIN_LOG_LEVEL=3 python scripts/train_pytorch.py pi05_libero_lora_pytorch_fp32 --exp_name testing_libero --save_interval 100
+  TF_CPP_MIN_LOG_LEVEL=3 python scripts/train_pytorch.py pi05_d3il_lora_pytorch --exp_name init_d3il --save_interval 100
   Example:
   python scripts/train_pytorch.py debug --exp_name pytorch_ddp_test
   python scripts/train_pytorch.py debug --exp_name pytorch_ddp_test --resume  # Resume from latest checkpoint
 Multi-GPU (single node):
-  torchrun --standalone --nnodes=1 --nproc_per_node=<num_gpus> scripts/train_pytorch.py <config_name> --exp_name <run_name>
+  TF_CPP_MIN_LOG_LEVEL=3 torchrun --standalone --nnodes=1 --nproc_per_node=4 scripts/train_pytorch.py pi05_d3il_lora_pytorch --exp_name init_d3il --save_interval 1000
   Example:
   torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train_pytorch.py pi0_aloha_sim --exp_name pytorch_ddp_test
   torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train_pytorch.py pi0_aloha_sim --exp_name pytorch_ddp_test --resume
@@ -39,6 +41,7 @@ import torch.distributed as dist
 import torch.nn.parallel
 import tqdm
 import wandb
+from contextlib import nullcontext
 
 import openpi.models.pi0_config
 import openpi.models_pytorch.pi0_pytorch
@@ -178,9 +181,9 @@ def save_checkpoint(model, optimizer, global_step, config, is_main, data_config,
         torch.save(metadata, tmp_ckpt_dir / "metadata.pt")
 
         # save norm stats
-        norm_stats = data_config.norm_stats
-        if norm_stats is not None and data_config.asset_id is not None:
-            _normalize.save(tmp_ckpt_dir / "assets" / data_config.asset_id, norm_stats)
+        # norm_stats = data_config.norm_stats
+        # if norm_stats is not None and data_config.asset_id is not None:
+        #     _normalize.save(tmp_ckpt_dir / "assets" / data_config.asset_id, norm_stats)
 
         # Atomically move temp directory to final location
         if final_ckpt_dir.exists():
@@ -438,12 +441,12 @@ def train_loop(config: _config.TrainConfig):
         log_memory_usage(device, 0, "after_model_creation")
 
     # Enable memory optimizations for large-scale training
-    if world_size >= 8:
+    if world_size >= 1:
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         # Set memory allocation configuration
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128,expandable_segments:True"
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         logging.info("Enabled memory optimizations for 8+ GPU training")
 
     if use_ddp:
@@ -519,6 +522,7 @@ def train_loop(config: _config.TrainConfig):
         if is_main
         else None
     )
+    context = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if config.model.pi05 and config.pytorch_training_precision=='float32' else nullcontext()
 
     while global_step < config.num_train_steps:
         # Set epoch for distributed training
@@ -539,15 +543,16 @@ def train_loop(config: _config.TrainConfig):
             for pg in optim.param_groups:
                 pg["lr"] = lr_schedule(global_step)
 
-            # Forward pass
-            losses = model(observation, actions)
-            # Ensure losses is a tensor and handle different return types
-            if isinstance(losses, list | tuple):
-                losses = torch.stack(losses)
-            elif not isinstance(losses, torch.Tensor):
-                losses = torch.tensor(losses, device=device, dtype=torch.float32)
+            with context:
+                # Forward pass
+                losses = model(observation, actions)
+                # Ensure losses is a tensor and handle different return types
+                if isinstance(losses, list | tuple):
+                    losses = torch.stack(losses)
+                elif not isinstance(losses, torch.Tensor):
+                    losses = torch.tensor(losses, device=device, dtype=torch.float32)
 
-            loss = losses.mean()
+                loss = losses.mean()
 
             # Backward pass
             loss.backward()
